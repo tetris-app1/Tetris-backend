@@ -18,6 +18,6 @@ COPY --from=builder /app .
 
 EXPOSE 4000
 
-ENV REDIS_HOST=redis
+ENV REDIS_HOST=redis.default.svc.cluster.local
 
 CMD ["node","server.js"]
