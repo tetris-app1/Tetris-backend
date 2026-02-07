@@ -126,7 +126,7 @@ pipeline {
           -H "Content-Type: application/json" \
           -d "{
             \\"status\\": \\"SUCCESS\\",
-            \\"service\\": \\"BACKEND\\",
+            \\"job_name\\": \\"${JOB_NAME}\\",
             \\"image\\": \\"${ECR_REGISTRY}/${ECR_REPO}:${BUILD_NUMBER}\\"
           }"
       '''
@@ -138,7 +138,7 @@ pipeline {
           -H "Content-Type: application/json" \
           -d "{
             \\"status\\": \\"FAILED\\",
-            \\"service\\": \\"BACKEND\\"
+            \\"job_name\\": \\"${JOB_NAME}\\",
           }"
       '''
     }
