@@ -133,7 +133,7 @@ pipeline {
   post {
     success {
       sh '''
-        curl -X POST http://192.168.163.129:5678/webhook/jenkins \
+        curl -X POST http://192.168.163.129:5678/webhook/jenkins/backend \
           -H "Content-Type: application/json" \
           -d "{
             \\"status\\": \\"SUCCESS\\",
@@ -145,7 +145,7 @@ pipeline {
 
     failure {
       sh '''
-        curl -X POST http://192.168.163.129:5678/webhook/jenkins \
+        curl -X POST http://192.168.163.129:5678/webhook/jenkins/backend \
           -H "Content-Type: application/json" \
           -d "{
             \\"status\\": \\"FAILED\\",
