@@ -102,8 +102,6 @@ pipeline {
             sh '''
               git pull --rebase origin main || true
 
-              // sed -i "s|image:.*|image: ${ECR_REGISTRY}/${ECR_REPO}:${BUILD_NUMBER}|g" \
-              // k8s_files/backend_deployment.yaml
               sed -i "s/tag:.*/tag: \\"${BUILD_NUMBER}\\"/1" tetris-app/values.yaml
 
               git config user.email "jenkins@ci.local"
