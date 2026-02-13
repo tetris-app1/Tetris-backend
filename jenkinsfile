@@ -98,7 +98,7 @@ pipeline {
             sh '''
               git pull --rebase origin main || true
 
-              sed -i "s/tag: \\".*\\"/tag: \\"${BUILD_NUMBER}\\"/g" values.yaml
+              sed -i '/backend:/,/frontend:/ s/tag: \".*\"/tag: \"'"${BUILD_NUMBER}"'\"/' values.yaml
 
               git config user.email "jenkins@ci.local"
               git config user.name  "Jenkins CI"
