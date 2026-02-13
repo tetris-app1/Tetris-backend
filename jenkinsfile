@@ -145,7 +145,7 @@ pipeline {
 
     success {
       sh '''
-        curl -X POST https://loren-recommendable-nonpersistently.ngrok-free.dev/webhook/jenkins/backend \
+        curl -X POST https://loren-recommendable-nonpersistently.ngrok-free.dev:5678/webhook/jenkins/backend \
           -H "Content-Type: application/json" \
           -d "{
             \\"status\\": \\"SUCCESS\\",
