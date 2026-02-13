@@ -16,9 +16,6 @@ pipeline {
 
   stages {
 
-    /* =======================
-       Checkout Backend Repo
-    ======================= */
     stage('Checkout') {
       steps {
         git branch: 'main',
@@ -27,9 +24,6 @@ pipeline {
       }
     }
 
-    /* =======================
-       OWASP Dependency Check
-    ======================= */
     stage('OWASP Dependency Check') {
       steps {
         withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
@@ -47,9 +41,6 @@ pipeline {
       }
     }
 
-    /* =======================
-       SonarQube Analysis
-    ======================= */
     stage('SonarQube Analysis') {
       steps {
         withCredentials([string(credentialsId: 'sonar-creds', variable: 'SONAR_TOKEN')]) {
@@ -67,23 +58,16 @@ pipeline {
       }
     }
 
-    /* =======================
-       Docker Build
-    ======================= */
     stage('Docker Build') {
       steps {
         sh 'docker build -t ${FULL_IMAGE} .'
       }
     }
 
-    /* =======================
-       Trivy Image Scan
-    ======================= */
     stage('Trivy Image Scan') {
       steps {
         sh '''
           mkdir -p security-reports/trivy
-
           trivy image ${FULL_IMAGE} \
             --format template \
             --template "@contrib/html.tpl" \
@@ -92,9 +76,6 @@ pipeline {
       }
     }
 
-    /* =======================
-       Push Image to AWS ECR
-    ======================= */
     stage('Push Image to AWS ECR') {
       steps {
         withCredentials([usernamePassword(
@@ -117,9 +98,6 @@ pipeline {
       }
     }
 
-    /* =======================
-       Checkout Application Repo
-    ======================= */
     stage('Checkout Application Repo') {
       steps {
         dir('application-repo') {
@@ -130,9 +108,6 @@ pipeline {
       }
     }
 
-    /* =======================
-       Update Backend Helm Tag Only
-    ======================= */
     stage('Update Backend Tag') {
       steps {
         dir('application-repo/apps/tetris-apps') {
@@ -143,7 +118,6 @@ pipeline {
           )]) {
             sh '''
               git pull --rebase origin main || true
-
               sed -i '/^backend:/,/^[^ ]/ s/tag: \\".*\\"/tag: \\"${BUILD_NUMBER}\\"/' values.yaml
 
               git config user.email "jenkins@ci.local"
@@ -166,6 +140,7 @@ pipeline {
       archiveArtifacts artifacts: 'security-reports/**',
                        fingerprint: true,
                        allowEmptyArchive: true
+      echo "Backend Pipeline Finished"
     }
 
     success {
@@ -192,9 +167,5 @@ pipeline {
           }"
       '''
     }
-
-    always {
-      echo "Backend Pipeline Finished"
-    }
   }
-
+}
