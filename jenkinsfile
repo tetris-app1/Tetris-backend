@@ -1,15 +1,17 @@
 pipeline {
-  agent any
+  agent { label 'aws-agent' }
 
   environment {
-    APP_NAME   = "tetris-backend"
     IMAGE_NAME = "tetris-backend"
     IMAGE_TAG  = "${BUILD_NUMBER}"
     FULL_IMAGE = "${IMAGE_NAME}:${IMAGE_TAG}"
 
-    AWS_REGION   = "eu-north-1"
-    ECR_REGISTRY = "268811324951.dkr.ecr.eu-north-1.amazonaws.com"
-    ECR_REPO     = "tetris-repo-backend"
+    AWS_REGION   = "us-east-1"
+    ECR_REGISTRY = "101561167685.dkr.ecr.us-east-1.amazonaws.com"
+    ECR_REPO     = "tetris-backend"
+
+    SONAR_HOST        = "http://192.168.163.129:9000"
+    SONAR_PROJECT_KEY = "tetris-backend"
   }
 
   stages {
@@ -26,14 +28,42 @@ pipeline {
     }
 
     /* =======================
-       Build Application
+       OWASP Dependency Check
     ======================= */
-    stage('Build') {
+    stage('OWASP Dependency Check') {
       steps {
-        sh '''
-          npm install
-          npm run build || echo "No build step required"
-        '''
+        withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
+          sh '''
+            mkdir -p security-reports/owasp
+            docker run --rm \
+              -v $WORKSPACE:/src \
+              owasp/dependency-check \
+              --scan /src \
+              --format HTML \
+              --out /src/security-reports/owasp \
+              --nvdApiKey $NVD_KEY || true
+          '''
+        }
+      }
+    }
+
+    /* =======================
+       SonarQube Analysis
+    ======================= */
+    stage('SonarQube Analysis') {
+      steps {
+        withCredentials([string(credentialsId: 'sonar-creds', variable: 'SONAR_TOKEN')]) {
+          sh '''
+            docker run --rm \
+              --network host \
+              -v $PWD:/usr/src \
+              sonarsource/sonar-scanner-cli \
+              -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+              -Dsonar.sources=. \
+              -Dsonar.host.url=${SONAR_HOST} \
+              -Dsonar.login=$SONAR_TOKEN || true
+          '''
+        }
       }
     }
 
@@ -43,6 +73,22 @@ pipeline {
     stage('Docker Build') {
       steps {
         sh 'docker build -t ${FULL_IMAGE} .'
+      }
+    }
+
+    /* =======================
+       Trivy Image Scan
+    ======================= */
+    stage('Trivy Image Scan') {
+      steps {
+        sh '''
+          mkdir -p security-reports/trivy
+
+          trivy image ${FULL_IMAGE} \
+            --format template \
+            --template "@contrib/html.tpl" \
+            --output security-reports/trivy/trivy-report.html || true
+        '''
       }
     }
 
@@ -85,9 +131,9 @@ pipeline {
     }
 
     /* =======================
-       Update Image Tag in Helm values.yaml
+       Update Backend Helm Tag Only
     ======================= */
-    stage('Update Image in Repo') {
+    stage('Update Backend Tag') {
       steps {
         dir('application-repo/apps/tetris-apps') {
           withCredentials([usernamePassword(
@@ -98,7 +144,7 @@ pipeline {
             sh '''
               git pull --rebase origin main || true
 
-              sed -i '/backend:/,/frontend:/ s/tag: \".*\"/tag: \"'"${BUILD_NUMBER}"'\"/' values.yaml
+              sed -i '/^backend:/,/^[^ ]/ s/tag: \\".*\\"/tag: \\"${BUILD_NUMBER}\\"/' values.yaml
 
               git config user.email "jenkins@ci.local"
               git config user.name  "Jenkins CI"
@@ -115,6 +161,12 @@ pipeline {
   }
 
   post {
+
+    always {
+      archiveArtifacts artifacts: 'security-reports/**',
+                       fingerprint: true,
+                       allowEmptyArchive: true
+    }
 
     success {
       sh '''
