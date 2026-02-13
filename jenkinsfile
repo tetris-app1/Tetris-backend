@@ -2,9 +2,7 @@ pipeline {
   agent any
 
   environment {
-    APP_NAME = "tetris-backend"
-    BUILD_DIR = "build-artifacts"
-
+    APP_NAME   = "tetris-backend"
     IMAGE_NAME = "tetris-backend"
     IMAGE_TAG  = "${BUILD_NUMBER}"
     FULL_IMAGE = "${IMAGE_NAME}:${IMAGE_TAG}"
@@ -18,7 +16,7 @@ pipeline {
 
     /* =======================
        Checkout Backend Repo
-       ======================= */
+    ======================= */
     stage('Checkout') {
       steps {
         git branch: 'main',
@@ -28,31 +26,29 @@ pipeline {
     }
 
     /* =======================
-       Build Artifacts
-       ======================= */
-    stage('Build Artifacts') {
+       Build Application
+    ======================= */
+    stage('Build') {
       steps {
         sh '''
           npm install
-          npm run build || echo "No build step for backend"
+          npm run build || echo "No build step required"
         '''
       }
     }
 
     /* =======================
        Docker Build
-       ======================= */
+    ======================= */
     stage('Docker Build') {
       steps {
-        sh '''
-          docker build -t ${FULL_IMAGE} .
-        '''
+        sh 'docker build -t ${FULL_IMAGE} .'
       }
     }
 
     /* =======================
        Push Image to AWS ECR
-       ======================= */
+    ======================= */
     stage('Push Image to AWS ECR') {
       steps {
         withCredentials([usernamePassword(
@@ -77,10 +73,10 @@ pipeline {
 
     /* =======================
        Checkout Application Repo
-       ======================= */
+    ======================= */
     stage('Checkout Application Repo') {
       steps {
-        dir('application-repo/apps/tetris-apps') {
+        dir('application-repo') {
           git branch: 'main',
               credentialsId: 'Creds-k8s',
               url: 'https://github.com/tetris-app1/Application_Repo'
@@ -89,8 +85,8 @@ pipeline {
     }
 
     /* =======================
-       Update Backend Image
-       ======================= */
+       Update Image Tag in Helm values.yaml
+    ======================= */
     stage('Update Image in Repo') {
       steps {
         dir('application-repo/apps/tetris-apps') {
@@ -102,12 +98,12 @@ pipeline {
             sh '''
               git pull --rebase origin main || true
 
-              sed -i "s/tag:.*/tag: \\"${BUILD_NUMBER}\\"/1" tetris-app/values.yaml
+              sed -i "s/tag: \\".*\\"/tag: \\"${BUILD_NUMBER}\\"/g" values.yaml
 
               git config user.email "jenkins@ci.local"
               git config user.name  "Jenkins CI"
 
-              git add k8s_files/backend_deployment.yaml
+              git add values.yaml
               git commit -m "Update backend image to ${BUILD_NUMBER}" || echo "No changes"
 
               git push https://${GIT_USER}:${GIT_PASS}@github.com/tetris-app1/Application_Repo.git main
@@ -119,6 +115,7 @@ pipeline {
   }
 
   post {
+
     success {
       sh '''
         curl -X POST http://192.168.163.129:5678/webhook/jenkins/backend \
@@ -126,6 +123,7 @@ pipeline {
           -d "{
             \\"status\\": \\"SUCCESS\\",
             \\"job_name\\": \\"${JOB_NAME}\\",
+            \\"build_number\\": \\"${BUILD_NUMBER}\\",
             \\"image\\": \\"${ECR_REGISTRY}/${ECR_REPO}:${BUILD_NUMBER}\\"
           }"
       '''
@@ -138,6 +136,7 @@ pipeline {
           -d "{
             \\"status\\": \\"FAILED\\",
             \\"job_name\\": \\"${JOB_NAME}\\",
+            \\"build_number\\": \\"${BUILD_NUMBER}\\"
           }"
       '''
     }
