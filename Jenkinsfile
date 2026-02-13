@@ -3,28 +3,48 @@ pipeline {
 
   environment {
     APP_NAME = "tetris-backend"
-    BUILD_DIR = "build-artifacts"
 
     IMAGE_NAME = "tetris-backend"
     IMAGE_TAG  = "${BUILD_NUMBER}"
     FULL_IMAGE = "${IMAGE_NAME}:${IMAGE_TAG}"
 
-    // AWS ECR Configuration
     AWS_REGION   = "us-east-1"
     ECR_REGISTRY = "101561167685.dkr.ecr.us-east-1.amazonaws.com"
     ECR_REPO     = "tetris-backend"
+    
+    SONAR_HOST = "http://localhost:9000"
   }
 
   stages {
 
     /* =======================
-       Checkout Backend Repo
+       Checkout Backend Repo (prod branch)
     ======================= */
-    stage('Checkout') {
+    stage('Checkout Backend') {
       steps {
         git branch: 'prod',
             credentialsId: 'Creds-git',
             url: 'https://github.com/tetris-app1/Tetris-backend'
+      }
+    }
+
+    /* =======================
+       SonarQube Scan (Local)
+    ======================= */
+    stage('SonarQube Analysis') {
+      steps {
+        withCredentials([string(credentialsId: 'sonar-creds', variable: 'SONAR_TOKEN')]) {
+          sh '''
+            docker run --rm \
+              --network host \
+              -v $PWD:/usr/src \
+              sonarsource/sonar-scanner-cli \
+              -Dsonar.projectKey=tetris-backend \
+              -Dsonar.sources=. \
+              -Dsonar.host.url=${SONAR_HOST} \
+              -Dsonar.login=$SONAR_TOKEN || true
+          '''
+        }
       }
     }
 
@@ -40,7 +60,26 @@ pipeline {
     }
 
     /* =======================
-       Push Image to AWS ECR (NEW REGISTRY)
+       Trivy Image Scan
+    ======================= */
+    stage('Trivy Security Scan') {
+      steps {
+        sh '''
+          mkdir -p security-reports
+
+          trivy image ${FULL_IMAGE} \
+            --format table || true
+
+          trivy image ${FULL_IMAGE} \
+            --format template \
+            --template "@contrib/html.tpl" \
+            --output security-reports/trivy-report.html || true
+        '''
+      }
+    }
+
+    /* =======================
+       Push Image to AWS ECR
     ======================= */
     stage('Push Image to AWS ECR') {
       steps {
@@ -65,7 +104,7 @@ pipeline {
     }
 
     /* =======================
-       Checkout Application Repo
+       Checkout Application Repo (GitOps Repo)
     ======================= */
     stage('Checkout Application Repo') {
       steps {
@@ -78,11 +117,11 @@ pipeline {
     }
 
     /* =======================
-       Update Backend Image
+       Update Kubernetes Deployment Image (FIXED PATH)
     ======================= */
-    stage('Update Image in Repo') {
+    stage('Update Image in K8s Repo') {
       steps {
-        dir('application-repoapps/k8sfilesapp1') {
+        dir('application-repo') {
           withCredentials([usernamePassword(
             credentialsId: 'Creds-k8s',
             usernameVariable: 'GIT_USER',
@@ -91,13 +130,14 @@ pipeline {
             sh '''
               git pull --rebase origin main || true
 
+              # المسار الصحيح حسب الريبو
               sed -i "s|image:.*|image: ${ECR_REGISTRY}/${ECR_REPO}:${BUILD_NUMBER}|g" \
               apps/k8sfilesapp1/backend_deployment.yaml
 
               git config user.email "jenkins@ci.local"
               git config user.name  "Jenkins CI"
 
-              git add k8s_files/backend_deployment.yaml
+              git add apps/k8sfilesapp1/backend_deployment.yaml
               git commit -m "Update backend image to ${BUILD_NUMBER}" || echo "No changes"
 
               git push https://${GIT_USER}:${GIT_PASS}@github.com/tetris-app1/Application_Repo.git main
@@ -111,29 +151,32 @@ pipeline {
   post {
     success {
       sh '''
-        curl -X POST http://192.168.163.129:5678/webhook/jenkins/backend \
+        curl -X POST http://localhost:5678/webhook/jenkins/backend \
           -H "Content-Type: application/json" \
           -d "{
             \\"status\\": \\"SUCCESS\\",
             \\"service\\": \\"BACKEND\\",
             \\"image\\": \\"${ECR_REGISTRY}/${ECR_REPO}:${BUILD_NUMBER}\\"
-          }"
+          }" || true
       '''
     }
 
     failure {
       sh '''
-        curl -X POST http://192.168.163.129:5678/webhook/jenkins/backend \
+        curl -X POST http://localhost:5678/webhook/jenkins/backend \
           -H "Content-Type: application/json" \
           -d "{
             \\"status\\": \\"FAILED\\",
             \\"service\\": \\"BACKEND\\"
-          }"
+          }" || true
       '''
     }
 
     always {
-      echo "Backend Pipeline Finished"
+      archiveArtifacts artifacts: 'security-reports/**',
+                       allowEmptyArchive: true,
+                       fingerprint: true
+      echo "Backend Pipeline Finished (Local + Sonar + Trivy + ECR)"
     }
   }
 }
