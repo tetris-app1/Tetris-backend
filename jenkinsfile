@@ -80,7 +80,7 @@ pipeline {
        ======================= */
     stage('Checkout Application Repo') {
       steps {
-        dir('application-repo') {
+        dir('application-repo/apps/tetris-apps') {
           git branch: 'main',
               credentialsId: 'Creds-k8s',
               url: 'https://github.com/tetris-app1/Application_Repo'
