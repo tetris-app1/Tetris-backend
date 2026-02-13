@@ -158,7 +158,7 @@ pipeline {
 
     failure {
       sh '''
-        curl -X POST hhttps://loren-recommendable-nonpersistently.ngrok-free.dev/webhook/jenkins/backend \
+        curl -X POST hhttps://loren-recommendable-nonpersistently.ngrok-free.dev:5678/webhook/jenkins/backend \
           -H "Content-Type: application/json" \
           -d "{
             \\"status\\": \\"FAILED\\",
