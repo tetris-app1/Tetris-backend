@@ -1,81 +1,47 @@
 pipeline {
-  agent { label 'aws-agent' }
+  agent any
 
   environment {
+    APP_NAME = "tetris-backend"
+    BUILD_DIR = "build-artifacts"
+
     IMAGE_NAME = "tetris-backend"
     IMAGE_TAG  = "${BUILD_NUMBER}"
     FULL_IMAGE = "${IMAGE_NAME}:${IMAGE_TAG}"
 
+    // AWS ECR Configuration
     AWS_REGION   = "us-east-1"
     ECR_REGISTRY = "101561167685.dkr.ecr.us-east-1.amazonaws.com"
     ECR_REPO     = "tetris-backend"
-
-    SONAR_HOST        = "http://:9000"
-    SONAR_PROJECT_KEY = "tetris-backend"
   }
 
   stages {
 
+    /* =======================
+       Checkout Backend Repo
+    ======================= */
     stage('Checkout') {
       steps {
-        git branch: 'main',
+        git branch: 'prod',
             credentialsId: 'Creds-git',
             url: 'https://github.com/tetris-app1/Tetris-backend'
       }
     }
 
-    stage('OWASP Dependency Check') {
-      steps {
-        withCredentials([string(credentialsId: 'nvd-api-key', variable: 'NVD_KEY')]) {
-          sh '''
-            mkdir -p security-reports/owasp
-            docker run --rm \
-              -v $WORKSPACE:/src \
-              owasp/dependency-check \
-              --scan /src \
-              --format HTML \
-              --out /src/security-reports/owasp \
-              --nvdApiKey $NVD_KEY || true
-          '''
-        }
-      }
-    }
-
-    stage('SonarQube Analysis') {
-      steps {
-        withCredentials([string(credentialsId: 'sonar-creds', variable: 'SONAR_TOKEN')]) {
-          sh '''
-            docker run --rm \
-              --network host \
-              -v $PWD:/usr/src \
-              sonarsource/sonar-scanner-cli \
-              -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-              -Dsonar.sources=. \
-              -Dsonar.host.url=${SONAR_HOST} \
-              -Dsonar.login=$SONAR_TOKEN || true
-          '''
-        }
-      }
-    }
-
+    /* =======================
+       Docker Build
+    ======================= */
     stage('Docker Build') {
       steps {
-        sh 'docker build -t ${FULL_IMAGE} .'
-      }
-    }
-
-    stage('Trivy Image Scan') {
-      steps {
         sh '''
-          mkdir -p security-reports/trivy
-          trivy image ${FULL_IMAGE} \
-            --format template \
-            --template "@contrib/html.tpl" \
-            --output security-reports/trivy/trivy-report.html || true
+          docker build -t ${FULL_IMAGE} .
         '''
       }
     }
 
+    /* =======================
+       Push Image to AWS ECR (NEW REGISTRY)
+    ======================= */
     stage('Push Image to AWS ECR') {
       steps {
         withCredentials([usernamePassword(
@@ -98,6 +64,9 @@ pipeline {
       }
     }
 
+    /* =======================
+       Checkout Application Repo
+    ======================= */
     stage('Checkout Application Repo') {
       steps {
         dir('application-repo') {
@@ -108,9 +77,12 @@ pipeline {
       }
     }
 
-    stage('Update Backend Tag') {
+    /* =======================
+       Update Backend Image
+    ======================= */
+    stage('Update Image in Repo') {
       steps {
-        dir('application-repo/apps/tetris-apps') {
+        dir('application-repoapps/k8sfilesapp1') {
           withCredentials([usernamePassword(
             credentialsId: 'Creds-k8s',
             usernameVariable: 'GIT_USER',
@@ -118,12 +90,14 @@ pipeline {
           )]) {
             sh '''
               git pull --rebase origin main || true
-              sed -i '/^backend:/,/^[^ ]/ s/tag: \\".*\\"/tag: \\"${BUILD_NUMBER}\\"/' values.yaml
+
+              sed -i "s|image:.*|image: ${ECR_REGISTRY}/${ECR_REPO}:${BUILD_NUMBER}|g" \
+              apps/k8sfilesapp1/backend_deployment.yaml
 
               git config user.email "jenkins@ci.local"
               git config user.name  "Jenkins CI"
 
-              git add values.yaml
+              git add k8s_files/backend_deployment.yaml
               git commit -m "Update backend image to ${BUILD_NUMBER}" || echo "No changes"
 
               git push https://${GIT_USER}:${GIT_PASS}@github.com/tetris-app1/Application_Repo.git main
@@ -135,22 +109,13 @@ pipeline {
   }
 
   post {
-
-    always {
-      archiveArtifacts artifacts: 'security-reports/**',
-                       fingerprint: true,
-                       allowEmptyArchive: true
-      echo "Backend Pipeline Finished"
-    }
-
     success {
       sh '''
-        curl -X POST https://loren-recommendable-nonpersistently.ngrok-free.dev:5678/webhook/jenkins/backend \
+        curl -X POST http://192.168.163.129:5678/webhook/jenkins/backend \
           -H "Content-Type: application/json" \
           -d "{
             \\"status\\": \\"SUCCESS\\",
-            \\"job_name\\": \\"${JOB_NAME}\\",
-            \\"build_number\\": \\"${BUILD_NUMBER}\\",
+            \\"service\\": \\"BACKEND\\",
             \\"image\\": \\"${ECR_REGISTRY}/${ECR_REPO}:${BUILD_NUMBER}\\"
           }"
       '''
@@ -158,14 +123,17 @@ pipeline {
 
     failure {
       sh '''
-        curl -X POST hhttps://loren-recommendable-nonpersistently.ngrok-free.dev:5678/webhook/jenkins/backend \
+        curl -X POST http://192.168.163.129:5678/webhook/jenkins/backend \
           -H "Content-Type: application/json" \
           -d "{
             \\"status\\": \\"FAILED\\",
-            \\"job_name\\": \\"${JOB_NAME}\\",
-            \\"build_number\\": \\"${BUILD_NUMBER}\\"
+            \\"service\\": \\"BACKEND\\"
           }"
       '''
+    }
+
+    always {
+      echo "Backend Pipeline Finished"
     }
   }
 }
